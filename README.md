@@ -1,5 +1,7 @@
 # OpenMENA API Library and Simulator
 
+![Web UI Simulator](./screenshot.png)
+
 Welcome to the **OpenMENA API Library and Simulator**! This repository provides an interactive software simulator and a high-level Python API for the OpenMENA (Open Memristor-in-Memory Accelerator) platform. It allows researchers and developers to simulate, visualize, and experiment with memristor-based crossbars for neuromorphic edge-AI applications without requiring physical hardware.
 
 This project is built upon the incredible foundational work of the **OpenMENA project**. 
