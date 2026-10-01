@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMENA Crossbar Visualizer</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        h1 { text-align: center; color: #58a6ff; margin-bottom: 5px; font-size: 1.6em; }
+        .subtitle { text-align: center; color: #8b949e; margin-bottom: 20px; font-size: 0.9em; }
+
+        nav { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; }
+        nav a { color: #58a6ff; text-decoration: none; padding: 6px 16px; border: 1px solid #30363d; border-radius: 6px; font-size: 0.85em; }
+        nav a:hover { background: #161b22; }
+        nav a.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+
+        .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+        .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+        .panel h2 { color: #58a6ff; font-size: 1em; margin-bottom: 12px; border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+
+        /* Crossbar Grid */
+        .crossbar-container { display: flex; flex-direction: column; align-items: center; }
+        .crossbar-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; width: 100%; max-width: 400px; }
+        .crossbar-cell {
+            aspect-ratio: 1; border-radius: 4px; cursor: pointer;
+            background: #1a1a2e; border: 1px solid #30363d;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.55em; color: #8b949e; transition: all 0.3s ease;
+            position: relative;
+        }
+        .crossbar-cell:hover { border-color: #58a6ff; z-index: 2; transform: scale(1.1); }
+        .crossbar-cell.selected { border-color: #f0883e; border-width: 2px; }
+        .crossbar-cell .cell-label { font-size: 0.7em; opacity: 0.6; }
+
+        .row-labels, .col-labels { display: flex; }
+        .col-labels { justify-content: center; gap: 3px; max-width: 400px; width: 100%; margin-bottom: 4px; }
+        .col-labels span { flex: 1; text-align: center; font-size: 0.65em; color: #8b949e; }
+        .grid-with-labels { display: flex; gap: 4px; align-items: stretch; width: 100%; max-width: 430px; }
+        .row-labels { flex-direction: column; gap: 3px; justify-content: space-around; }
+        .row-labels span { font-size: 0.65em; color: #8b949e; display: flex; align-items: center; }
+
+        /* Controls */
+        .control-group { margin-bottom: 12px; }
+        .control-group label { display: block; font-size: 0.8em; color: #8b949e; margin-bottom: 4px; }
+        input[type="number"], input[type="text"], select {
+            width: 100%; padding: 6px 8px; background: #0d1117; color: #c9d1d9;
+            border: 1px solid #30363d; border-radius: 4px; font-size: 0.85em;
+        }
+        input[type="range"] { width: 100%; }
+        .btn {
+            padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+            font-weight: 600; font-size: 0.85em; transition: background 0.2s;
+        }
+        .btn-primary { background: #238636; color: #fff; }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-danger { background: #da3633; color: #fff; }
+        .btn-danger:hover { background: #f85149; }
+        .btn-blue { background: #1f6feb; color: #fff; }
+        .btn-blue:hover { background: #388bfd; }
+        .btn-orange { background: #d29922; color: #000; }
+        .btn-orange:hover { background: #e3b341; }
+        .btn-group { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+        .inline-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        /* MVM */
+        .mvm-input-row { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+        .mvm-input-row input { width: 50px; text-align: center; }
+        .mvm-result { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+        .mvm-result-cell {
+            padding: 4px 8px; background: #0d1117; border: 1px solid #30363d;
+            border-radius: 4px; font-size: 0.75em; font-family: monospace;
+        }
+
+        /* Log */
+        #log-container {
+            max-height: 200px; overflow-y: auto; background: #0d1117;
+            border: 1px solid #30363d; border-radius: 4px; padding: 8px;
+            font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.75em;
+            line-height: 1.6;
+        }
+        .log-entry { color: #8b949e; }
+        .log-entry.vipi { color: #7ee787; }
+        .log-entry.error { color: #f85149; }
+
+        /* Stats */
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .stat-card {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+            padding: 10px; text-align: center;
+        }
+        .stat-card .stat-value { font-size: 1.2em; color: #58a6ff; font-weight: bold; font-family: monospace; }
+        .stat-card .stat-label { font-size: 0.7em; color: #8b949e; margin-top: 2px; }
+
+        /* Color scale legend */
+        .color-legend {
+            display: flex; align-items: center; gap: 8px; margin-top: 12px;
+            font-size: 0.7em; color: #8b949e; justify-content: center;
+        }
+        .color-bar {
+            width: 150px; height: 12px; border-radius: 3px;
+            background: linear-gradient(to right, #1a1a2e, #0d4a6b, #0e7c7b, #17b890, #a7ff83);
+        }
+
+        /* VIPI animation */
+        .vipi-progress { margin-top: 8px; }
+        .vipi-bar { height: 6px; background: #30363d; border-radius: 3px; overflow: hidden; }
+        .vipi-bar-fill { height: 100%; background: #7ee787; transition: width 0.1s; width: 0%; }
+
+        /* File upload */
+        .file-upload-area {
+            border: 2px dashed #30363d; border-radius: 8px; padding: 20px;
+            text-align: center; cursor: pointer; transition: border-color 0.2s;
+        }
+        .file-upload-area:hover { border-color: #58a6ff; }
+        .file-upload-area.drag-over { border-color: #7ee787; background: rgba(126, 231, 135, 0.05); }
+
+        .full-width { grid-column: 1 / -1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ OpenMENA Crossbar Visualizer</h1>
+        <p class="subtitle">Open Memristor-in-Memory Accelerator — VIPI Programming Interface</p>
+
+        <nav>
+            <a href="/" class="active">OpenMENA Crossbar</a>
+        </nav>
+
+        <div class="main-grid">
+            <!-- Crossbar Visualization -->
+            <div class="panel">
+                <h2>🔬 Crossbar Array (8×8)</h2>
+                <div class="crossbar-container">
+                    <div class="col-labels" id="col-labels"></div>
+                    <div class="grid-with-labels">
+                        <div class="row-labels" id="row-labels"></div>
+                        <div class="crossbar-grid" id="crossbar-grid"></div>
+                    </div>
+                    <div class="color-legend">
+                        <span>G<sub>min</sub> (1µS)</span>
+                        <div class="color-bar"></div>
+                        <span>G<sub>max</sub> (1mS)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operations Panel -->
+            <div class="panel">
+                <h2>🎛️ Device Operations</h2>
+                <div class="control-group">
+                    <label>Selected Cell: <strong id="selected-cell-label">(0, 0)</strong></label>
+                </div>
+                <div class="inline-controls">
+                    <div class="control-group">
+                        <label>Row</label>
+                        <input type="number" id="sel-row" min="0" max="7" value="0">
+                    </div>
+                    <div class="control-group">
+                        <label>Column</label>
+                        <input type="number" id="sel-col" min="0" max="7" value="0">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="formCell()">Form Cell</button>
+                    <button class="btn btn-blue" onclick="formAll()">Form All</button>
+                    <button class="btn btn-danger" onclick="resetCell()">Reset Cell</button>
+                    <button class="btn btn-danger" onclick="resetAll()">Reset All</button>
+                </div>
+                <hr style="border-color: #30363d; margin: 12px 0;">
+
+                <div class="control-group">
+                    <label>Target Conductance (S)</label>
+                    <input type="range" id="target-g-slider" min="0" max="1000" value="500"
+                           oninput="document.getElementById('target-g-val').innerText = (this.value / 1e6).toExponential(2)">
+                    <span id="target-g-val" style="font-size:0.8em; color:#58a6ff;">5.00e-4</span>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="setCell()">SET (Direct)</button>
+                    <button class="btn btn-orange" onclick="vipiProgram()">VIPI Program</button>
+                </div>
+
+                <div class="vipi-progress" id="vipi-progress" style="display:none;">
+                    <label style="font-size:0.75em; color:#7ee787;">VIPI Progress</label>
+                    <div class="vipi-bar"><div class="vipi-bar-fill" id="vipi-bar-fill"></div></div>
+                </div>
+            </div>
+
+            <!-- VIPI Parameters -->
+            <div class="panel">
+                <h2>🧮 VIPI Parameters</h2>
+                <div class="inline-controls">
+                    <div class="control-group">
+                        <label>K<sub>p</sub> (Proportional)</label>
+                        <input type="number" id="vipi-kp" value="0.5" step="0.1" min="0">
+                    </div>
+                    <div class="control-group">
+                        <label>K<sub>i</sub> (Integral)</label>
+                        <input type="number" id="vipi-ki" value="0.1" step="0.05" min="0">
+                    </div>
+                    <div class="control-group">
+                        <label>V<sub>inc</sub> (V step)</label>
+                        <input type="number" id="vipi-vinc" value="0.05" step="0.01" min="0">
+                    </div>
+                    <div class="control-group">
+                        <label>Max Iterations</label>
+                        <input type="number" id="vipi-maxiter" value="50" step="5" min="1">
+                    </div>
+                    <div class="control-group">
+                        <label>Tolerance</label>
+                        <input type="number" id="vipi-tol" value="0.05" step="0.01" min="0.001">
+                    </div>
+                </div>
+
+                <hr style="border-color: #30363d; margin: 12px 0;">
+                <h2 style="margin-top:8px;">⚡ VIPI Program Matrix</h2>
+                <div class="control-group">
+                    <label>Pattern Preset</label>
+                    <select id="pattern-select">
+                        <option value="identity">Identity Matrix</option>
+                        <option value="gradient">Gradient</option>
+                        <option value="checkerboard">Checkerboard</option>
+                        <option value="random">Random</option>
+                        <option value="diagonal">Diagonal Bands</option>
+                        <option value="ring">Ring Pattern</option>
+                    </select>
+                </div>
+                <button class="btn btn-orange" onclick="vipiProgramMatrix()">VIPI Program Full Matrix</button>
+            </div>
+
+            <!-- MVM Panel -->
+            <div class="panel">
+                <h2>📐 Matrix-Vector Multiply (I = G·V)</h2>
+                <div class="control-group">
+                    <label>Input Voltages (V<sub>0</sub>..V<sub>7</sub>)</label>
+                    <div class="mvm-input-row" id="mvm-inputs"></div>
+                </div>
+                <div class="control-group">
+                    <label>Preset</label>
+                    <select id="mvm-preset" onchange="applyMvmPreset()">
+                        <option value="ones">All 1.0V</option>
+                        <option value="unit0">Unit e₀</option>
+                        <option value="ramp">Ramp 0→1</option>
+                        <option value="sine">Sine wave</option>
+                        <option value="random">Random</option>
+                    </select>
+                </div>
+                <button class="btn btn-blue" onclick="runMVM()">Run MVM</button>
+                <div class="control-group" style="margin-top: 12px;">
+                    <label>Output Currents (I<sub>0</sub>..I<sub>7</sub>)</label>
+                    <div class="mvm-result" id="mvm-results">
+                        <span style="color:#8b949e; font-size:0.8em;">Run MVM to see results</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File I/O -->
+            <div class="panel">
+                <h2>💾 Binary File I/O</h2>
+                <div class="file-upload-area" id="file-upload-area"
+                     ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                     ondragleave="this.classList.remove('drag-over')"
+                     ondrop="handleFileDrop(event)">
+                    <p>📁 Drag & drop a <strong>.bin</strong> file here</p>
+                    <p style="font-size:0.75em; color:#8b949e; margin-top:4px;">or click to browse</p>
+                    <input type="file" id="file-input" accept=".bin" style="display:none" onchange="handleFileSelect(event)">
+                </div>
+                <div class="btn-group" style="margin-top: 8px;">
+                    <button class="btn btn-blue" onclick="downloadState()">⬇ Download State (.bin)</button>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="panel">
+                <h2>📊 Array Statistics</h2>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-avg">—</div>
+                        <div class="stat-label">Avg G</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-min">—</div>
+                        <div class="stat-label">Min G</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-max">—</div>
+                        <div class="stat-label">Max G</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-formed">—</div>
+                        <div class="stat-label">Formed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-stuck">—</div>
+                        <div class="stat-label">Stuck</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-cycles">—</div>
+                        <div class="stat-label">Total Cycles</div>
+                    </div>
+                </div>
+                <button class="btn btn-blue" style="margin-top:8px; width:100%;" onclick="requestStats()">Refresh Stats</button>
+            </div>
+
+            <!-- Log -->
+            <div class="panel full-width">
+                <h2>📋 Event Log</h2>
+                <div id="log-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const ROWS = 8, COLS = 8;
+        const G_MIN = 1e-6, G_MAX = 1e-3;
+
+        // Cell data
+        let cellData = Array.from({length: ROWS}, () => Array.from({length: COLS}, () => ({g: G_MIN, norm: 0})));
+        let selectedRow = 0, selectedCol = 0;
+
+        // ===== Build UI =====
+        function buildGrid() {
+            const grid = document.getElementById('crossbar-grid');
+            const colLabels = document.getElementById('col-labels');
+            const rowLabels = document.getElementById('row-labels');
+            grid.innerHTML = '';
+            colLabels.innerHTML = '';
+            rowLabels.innerHTML = '';
+
+            for (let c = 0; c < COLS; c++) {
+                colLabels.innerHTML += `<span>C${c}</span>`;
+            }
+            for (let r = 0; r < ROWS; r++) {
+                rowLabels.innerHTML += `<span>R${r}</span>`;
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'crossbar-cell';
+                    cell.id = `cell-${r}-${c}`;
+                    cell.title = `(${r},${c})`;
+                    cell.onclick = () => selectCell(r, c);
+                    grid.appendChild(cell);
+                }
+            }
+
+            // MVM inputs
+            const mvmInputs = document.getElementById('mvm-inputs');
+            mvmInputs.innerHTML = '';
+            for (let i = 0; i < ROWS; i++) {
+                mvmInputs.innerHTML += `<input type="number" id="mvm-v-${i}" value="1.0" step="0.1" min="-1" max="1" title="V${i}">`;
+            }
+        }
+
+        function selectCell(r, c) {
+            document.querySelectorAll('.crossbar-cell.selected').forEach(el => el.classList.remove('selected'));
+            selectedRow = r; selectedCol = c;
+            document.getElementById(`cell-${r}-${c}`).classList.add('selected');
+            document.getElementById('sel-row').value = r;
+            document.getElementById('sel-col').value = c;
+            document.getElementById('selected-cell-label').innerText =
+                `(${r}, ${c}) — G = ${cellData[r][c].g.toExponential(3)} S`;
+        }
+
+        function updateCellDisplay(r, c, g, norm) {
+            cellData[r][c] = {g, norm};
+            const cell = document.getElementById(`cell-${r}-${c}`);
+            if (!cell) return;
+
+            // Color mapping: dark blue → teal → green → bright green
+            const hue = 120 + (1 - norm) * 80; // 120 (green) to 200 (teal)
+            const lightness = 10 + norm * 45;
+            const saturation = 30 + norm * 50;
+            cell.style.background = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+            cell.style.boxShadow = norm > 0.3 ? `0 0 ${norm * 12}px hsla(${hue}, 70%, 50%, ${norm * 0.5})` : 'none';
+
+            if (r === selectedRow && c === selectedCol) {
+                document.getElementById('selected-cell-label').innerText =
+                    `(${r}, ${c}) — G = ${g.toExponential(3)} S`;
+            }
+        }
+
+        // ===== Socket Events =====
+        socket.on('mena_cell', ({r, c, g, norm}) => {
+            updateCellDisplay(r, c, g, norm);
+        });
+
+        socket.on('mena_grid_done', () => {
+            // Grid refresh complete
+        });
+
+        socket.on('mena_mvm', (results) => {
+            const container = document.getElementById('mvm-results');
+            container.innerHTML = results.map((v, i) =>
+                `<div class="mvm-result-cell">I<sub>${i}</sub> = ${v.toExponential(3)}</div>`
+            ).join('');
+        });
+
+        socket.on('mena_vipi_step', ({r, c, iter, current_g, target_g, error, voltage}) => {
+            const maxIter = parseInt(document.getElementById('vipi-maxiter').value);
+            const pct = Math.min(100, (iter / maxIter) * 100);
+            document.getElementById('vipi-progress').style.display = 'block';
+            document.getElementById('vipi-bar-fill').style.width = pct + '%';
+        });
+
+        socket.on('mena_log', (msg) => {
+            addLog(msg);
+            if (msg.includes('converged') || msg.includes('VIPI')) {
+                document.getElementById('vipi-bar-fill').style.width = '100%';
+                setTimeout(() => {
+                    document.getElementById('vipi-progress').style.display = 'none';
+                    document.getElementById('vipi-bar-fill').style.width = '0%';
+                }, 1500);
+            }
+        });
+
+        socket.on('mena_stats', ({avg, min, max, formed, stuck, cycles}) => {
+            document.getElementById('stat-avg').innerText = avg.toExponential(2);
+            document.getElementById('stat-min').innerText = min.toExponential(2);
+            document.getElementById('stat-max').innerText = max.toExponential(2);
+            document.getElementById('stat-formed').innerText = formed + '/64';
+            document.getElementById('stat-stuck').innerText = stuck;
+            document.getElementById('stat-cycles').innerText = cycles;
+        });
+
+        socket.on('mena_download', ({data, filename}) => {
+            const bytes = new Uint8Array(data);
+            const blob = new Blob([bytes], {type: 'application/octet-stream'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename;
+            a.click(); URL.revokeObjectURL(url);
+        });
+
+        // ===== Actions =====
+        function getRC() {
+            return {
+                r: parseInt(document.getElementById('sel-row').value),
+                c: parseInt(document.getElementById('sel-col').value)
+            };
+        }
+
+        function getTargetG() {
+            return parseInt(document.getElementById('target-g-slider').value) / 1e6;
+        }
+
+        function formCell() {
+            const {r, c} = getRC();
+            socket.emit('mena_cmd', `FORM ${r} ${c} 3.0`);
+        }
+
+        function formAll() { socket.emit('mena_cmd', 'FORM_ALL 3.0'); }
+
+        function resetCell() {
+            const {r, c} = getRC();
+            socket.emit('mena_cmd', `RESET ${r} ${c}`);
+        }
+
+        function resetAll() { socket.emit('mena_cmd', 'RESET_ALL'); }
+
+        function setCell() {
+            const {r, c} = getRC();
+            socket.emit('mena_cmd', `SET ${r} ${c} ${getTargetG()}`);
+        }
+
+        function vipiProgram() {
+            const {r, c} = getRC();
+            const kp = document.getElementById('vipi-kp').value;
+            const ki = document.getElementById('vipi-ki').value;
+            const vinc = document.getElementById('vipi-vinc').value;
+            const maxiter = document.getElementById('vipi-maxiter').value;
+            const tol = document.getElementById('vipi-tol').value;
+            document.getElementById('vipi-progress').style.display = 'block';
+            document.getElementById('vipi-bar-fill').style.width = '0%';
+            socket.emit('mena_cmd', `VIPI ${r} ${c} ${getTargetG()} ${kp} ${ki} ${vinc} ${maxiter} ${tol}`);
+        }
+
+        function generatePattern(type) {
+            const vals = [];
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    let g;
+                    switch(type) {
+                        case 'identity':
+                            g = (r === c) ? G_MAX * 0.8 : G_MIN * 10;
+                            break;
+                        case 'gradient':
+                            g = G_MIN + (G_MAX - G_MIN) * ((r * COLS + c) / (ROWS * COLS));
+                            break;
+                        case 'checkerboard':
+                            g = ((r + c) % 2 === 0) ? G_MAX * 0.7 : G_MIN * 10;
+                            break;
+                        case 'random':
+                            g = G_MIN + Math.random() * (G_MAX - G_MIN);
+                            break;
+                        case 'diagonal':
+                            g = (Math.abs(r - c) <= 1) ? G_MAX * 0.6 : G_MIN * 5;
+                            break;
+                        case 'ring':
+                            const dr = Math.abs(r - 3.5), dc = Math.abs(c - 3.5);
+                            const dist = Math.sqrt(dr*dr + dc*dc);
+                            g = (dist >= 2 && dist <= 3.5) ? G_MAX * 0.7 : G_MIN * 5;
+                            break;
+                        default:
+                            g = G_MIN;
+                    }
+                    vals.push(g);
+                }
+            }
+            return vals;
+        }
+
+        function vipiProgramMatrix() {
+            const pattern = document.getElementById('pattern-select').value;
+            const vals = generatePattern(pattern);
+            socket.emit('mena_cmd', 'VIPI_MATRIX ' + vals.join(' '));
+        }
+
+        function runMVM() {
+            const voltages = [];
+            for (let i = 0; i < ROWS; i++) {
+                voltages.push(parseFloat(document.getElementById(`mvm-v-${i}`).value) || 0);
+            }
+            socket.emit('mena_cmd', 'MVM ' + voltages.join(' '));
+        }
+
+        function applyMvmPreset() {
+            const preset = document.getElementById('mvm-preset').value;
+            for (let i = 0; i < ROWS; i++) {
+                let v;
+                switch(preset) {
+                    case 'ones': v = 1.0; break;
+                    case 'unit0': v = (i === 0) ? 1.0 : 0.0; break;
+                    case 'ramp': v = i / (ROWS - 1); break;
+                    case 'sine': v = Math.sin(2 * Math.PI * i / ROWS); break;
+                    case 'random': v = Math.round(Math.random() * 100) / 100; break;
+                    default: v = 0;
+                }
+                document.getElementById(`mvm-v-${i}`).value = v.toFixed(2);
+            }
+        }
+
+        function requestStats() { socket.emit('mena_cmd', 'STATS'); }
+
+        // ===== File I/O =====
+        document.getElementById('file-upload-area').onclick = () => {
+            document.getElementById('file-input').click();
+        };
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) uploadFile(file);
+        }
+
+        function handleFileDrop(e) {
+            e.preventDefault();
+            document.getElementById('file-upload-area').classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) uploadFile(file);
+        }
+
+        function uploadFile(file) {
+            if (!file.name.endsWith('.bin')) {
+                addLog('Error: Only .bin files are supported');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const arrayBuf = e.target.result;
+                socket.emit('mena_upload_bin', {
+                    filename: file.name,
+                    data: Array.from(new Uint8Array(arrayBuf))
+                });
+                addLog('Uploaded: ' + file.name);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function downloadState() {
+            socket.emit('mena_download_state');
+        }
+
+        // ===== Log =====
+        function addLog(msg) {
+            const container = document.getElementById('log-container');
+            const cls = msg.includes('VIPI') || msg.includes('converged') ? 'vipi' :
+                        msg.includes('Error') || msg.includes('Failed') ? 'error' : '';
+            const ts = new Date().toLocaleTimeString();
+            container.innerHTML += `<div class="log-entry ${cls}">[${ts}] ${msg}</div>`;
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // ===== Init =====
+        buildGrid();
+        selectCell(0, 0);
+
+        // Request initial stats after connection
+        socket.on('connect', () => {
+            addLog('Connected to OpenMENA backend');
+            setTimeout(() => {
+                requestStats();
+                socket.emit('mena_cmd', 'READ_ALL');
+            }, 500);
+        });
+    </script>
+</body>
+</html>
